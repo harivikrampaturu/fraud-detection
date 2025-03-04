@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Capture</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            font-family: 'Arial', sans-serif;
+        }
+
+        .container {
+            height: 60vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            gap: 4rem;
+        }
+
+        .left,
+        .right {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s ease;
+        }
+
+        .left:hover,
+        .right:hover {
+            transform: translateY(-5px);
+        }
+
+        .avatar {
+            width: 200px;
+            height: 200px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            padding: 1rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .avatar img {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 4px solid white;
+        }
+
+        .name {
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        button {
+            padding: 0.8rem 2rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 50px;
+            background: white;
+            color: #1e3c72;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .active::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 300%;
+            height: 300%;
+            background: rgba(46, 213, 115, 0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            animation: ripple 0.5s ease-out infinite;
+            z-index: -1;
+        }
+
+        .left.active .name {
+            color: #ff0000;
+        }
+
+        .right.active .name {
+            color: #4CAF50;
+        }
+
+        @keyframes ripple {
+            0% {
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0;
+            }
+        }
+
+        footer {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            display: flex;
+            justify-content: center;
+        }
+
+        .logo img {
+            height: 40px;
+            filter: brightness(1.2) invert(1);
+        }
+
+        .switch-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            position: absolute;
+            right: 80px;
+            bottom: 20px;
+        }
+
+        .switch-container span {
+            color: white;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: #2196F3;
+        }
+
+        input:focus+.slider {
+            box-shadow: 0 0 1px #2196F3;
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(26px);
+        }
+
+        .switch-label {
+            color: white;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .wave {
+            width: 100%;
+            height: 150px;
+            margin-top: 27px;
+        }
+
+        #waveCanvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        footer {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            display: flex;
+            justify-content: center;
+            margin-top: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="enroll-container">
+        
+    </div>    
+
+    <div id="call-container">
+        <div class="container">
+            <div class="left">
+                <div class="avatar">
+                    <svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Face background -->
+                        <circle cx="60" cy="60" r="50" fill="#FF6B6B" />
+                        <!-- Eyes -->
+                        <circle cx="40" cy="50" r="6" fill="white" />
+                        <circle cx="80" cy="50" r="6" fill="white" />
+                        <!-- Eyebrows -->
+                        <path d="M35 40 Q40 35 45 40" stroke="white" stroke-width="3" fill="none" />
+                        <path d="M75 40 Q80 35 85 40" stroke="white" stroke-width="3" fill="none" />
+                        <!-- Sad mouth -->
+                        <path d="M40 80 Q60 70 80 80" stroke="white" stroke-width="3" fill="none" />
+                        <!-- Robot-like details -->
+                        <path d="M20 60 L30 60" stroke="white" stroke-width="2" />
+                        <path d="M90 60 L100 60" stroke="white" stroke-width="2" />
+                        <circle cx="60" cy="60" r="55" stroke="white" stroke-width="2" fill="none" stroke-dasharray="5,5" />
+                    </svg>
+                </div>
+                <div class="name">FAKE</div>
+            </div>
+            <div class="right">
+                <div class="avatar">
+                    <svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Face background -->
+                        <circle cx="60" cy="60" r="50" fill="#4CAF50" />
+                        <!-- Eyes -->
+                        <circle cx="40" cy="50" r="6" fill="white" />
+                        <circle cx="80" cy="50" r="6" fill="white" />
+                        <!-- Eyebrows -->
+                        <path d="M35 38 Q40 35 45 38" stroke="white" stroke-width="3" fill="none" />
+                        <path d="M75 38 Q80 35 85 38" stroke="white" stroke-width="3" fill="none" />
+                        <!-- Happy mouth -->
+                        <path d="M40 70 Q60 85 80 70" stroke="white" stroke-width="3" fill="none" />
+                        <!-- Natural face details -->
+                        <path d="M30 60 Q60 120 90 60" stroke="white" stroke-width="2" fill="none" opacity="0.3" />
+                        <circle cx="60" cy="60" r="55" stroke="white" stroke-width="2" fill="none" />
+                    </svg>
+                </div>
+                <div class="name">REAL</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="startButton">Start Recording</button>
+            <button id="stopButton" disabled>Stop Recording</button>
+        </div>
+
+        <div class="wave">
+            <canvas id="waveCanvas"></canvas>
+        </div>
+
+        <footer>
+            <div class="logo">
+                <img src="https://www.meeamitech.com/_next/static/media/MEEAMI_BLACK.5a633273.svg" alt="Meeami Logo">
+            </div>
+            <div class="switch-container">
+                <span class="switch-label">Spoofing Detection</span>
+                <label class="switch">
+                    <input type="checkbox" id="fakeButton">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </footer>
+
+        <script>
+            // Update the processor code to handle the audio data properly
+            const processorCode = `
+                class AudioProcessor extends AudioWorkletProcessor {
+                    constructor() {
+                        super();
+                        this.bufferSize = 2048;  // Changed from 4096 to 2048
+                        this.buffer = new Float32Array(this.bufferSize);
+                        this.bufferIndex = 0;
+                    }
+
+                    process(inputs, outputs, parameters) {
+                        const input = inputs[0][0];
+                        if (!input) return true;
+
+                        // Fill the buffer
+                        for (let i = 0; i < input.length; i++) {
+                            this.buffer[this.bufferIndex++] = input[i];
+                            
+                            // When buffer is full, send it
+                            if (this.bufferIndex >= this.bufferSize) {
+                                this.port.postMessage(this.buffer.slice());
+                                this.bufferIndex = 0;
+                            }
+                        }
+                        return true;
+                    }
+                }
+                registerProcessor('audio-processor', AudioProcessor);
+            `;
+
+            let audioStream;
+            let websocket;
+            let reconnectAttempts = 0;
+            const MAX_RECONNECT_ATTEMPTS = 5;
+            const getDeepfakeDetection = () => {
+                return localStorage.getItem('deepfakeDetection') === 'true';
+            }
+            let deepfakeDetection = getDeepfakeDetection();
+            let fakeButton = document.getElementById('fakeButton');
+            fakeButton.checked = getDeepfakeDetection();
+
+            fakeButton.addEventListener('change', () => {
+                const newState = fakeButton.checked;
+                localStorage.setItem('deepfakeDetection', newState);
+
+
+
+                if (websocket) {
+                    websocket.close();
+                    websocket = null;
+                    resetUIState();
+                    connectWebSocket();
+                }
+            });
+
+            const startButton = document.getElementById('startButton');
+            const stopButton = document.getElementById('stopButton');
+
+            startButton.addEventListener('click', startRecording);
+            stopButton.addEventListener('click', stopRecording);
+
+            // Update the Float32ArrayTo16BitPCM function to ensure correct conversion
+            function Float32ArrayTo16BitPCM(buffer) {
+                const output = new Int16Array(buffer.length);
+                for (let i = 0; i < buffer.length; i++) {
+                    const s = Math.max(-1, Math.min(1, buffer[i]));
+                    if (s < 0) {
+                        output[i] = s * 0x8000;
+                    } else {
+                        output[i] = s * 0x7FFF;
+                    }
+                }
+                return output.buffer;
+            }
+
+            let waveAnimationId = null;
+
+            function setupWaveVisualization(audioContext, audioSource) {
+                const analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+
+                audioSource.connect(analyser);
+
+                const canvas = document.getElementById('waveCanvas');
+                const canvasCtx = canvas.getContext('2d');
+
+                canvas.width = canvas.offsetWidth;
+                canvas.height = canvas.offsetHeight;
+
+                window.addEventListener('resize', () => {
+                    canvas.width = canvas.offsetWidth;
+                    canvas.height = canvas.offsetHeight;
+                });
+
+                function drawWave() {
+                    const bufferLength = analyser.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+                    analyser.getByteTimeDomainData(dataArray);
+
+                    canvasCtx.fillStyle = 'rgba(30, 60, 114, 0.2)';
+                    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+                    canvasCtx.lineWidth = 2;
+                    canvasCtx.strokeStyle = '#ffffff';
+                    canvasCtx.beginPath();
+
+                    const sliceWidth = canvas.width * 1.0 / bufferLength;
+                    let x = 0;
+
+                    for (let i = 0; i < bufferLength; i++) {
+                        const v = dataArray[i] / 128.0;
+                        const y = v * canvas.height / 2;
+
+                        if (i === 0) {
+                            canvasCtx.moveTo(x, y);
+                        } else {
+                            canvasCtx.lineTo(x, y);
+                        }
+
+                        x += sliceWidth;
+                    }
+
+                    canvasCtx.lineTo(canvas.width, canvas.height / 2);
+                    canvasCtx.stroke();
+
+                    if (!stopButton.disabled) {
+                        waveAnimationId = requestAnimationFrame(drawWave);
+                    }
+                }
+
+                drawWave();
+                document.querySelector('.wave').style.display = 'block';
+
+                return { analyser, cancelAnimation: () => cancelAnimationFrame(waveAnimationId) };
+            }
+
+            function connectWebSocket() {
+                const deepfakeDetection = getDeepfakeDetection();
+                websocket = new WebSocket(deepfakeDetection ? 'ws://64.74.143.76:8017' : 'ws://64.74.143.76:8015');
+
+                websocket.onopen = function () {
+                    console.log('WebSocket connection established. with deepfakeDetection: ', deepfakeDetection);
+                    reconnectAttempts = 0;
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                };
+
+                websocket.onerror = function (error) {
+                    console.error('WebSocket error:', error);
+                    resetUIState();
+                };
+
+                websocket.onmessage = function (event) {
+                    console.log(event);
+                    const leftDiv = document.querySelector('.left');
+                    const rightDiv = document.querySelector('.right');
+                    if (String(event.data).toLowerCase() === 'fake') {
+                        leftDiv.classList.add('active');
+                        rightDiv.classList.remove('active');
+                    }
+                    /*     else if (String(event.data).toLowerCase() === 'real') {
+                            rightDiv.classList.add('active');
+                            leftDiv.classList.remove('active');
+                        }  */
+                    else {
+                        leftDiv.classList.remove('active');
+                        rightDiv.classList.remove('active');
+                    }
+                };
+
+                websocket.onclose = function () {
+                    console.log('WebSocket connection closed.');
+                    resetUIState();
+
+                    // Attempt to reconnect
+                    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                        reconnectAttempts++;
+                        console.log(`Attempting to reconnect... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+                        setTimeout(connectWebSocket, 2000);
+                    }
+                };
+            }
+
+            function resetUIState() {
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                const leftDiv = document.querySelector('.left');
+                const rightDiv = document.querySelector('.right');
+                leftDiv.classList.remove('active');
+                rightDiv.classList.remove('active');
+
+                if (audioStream) {
+                    audioStream.getTracks().forEach(track => track.stop());
+                }
+
+                // Cancel wave animation if it exists
+                if (waveAnimationId) {
+                    cancelAnimationFrame(waveAnimationId);
+                    waveAnimationId = null;
+                }
+                document.querySelector('.wave').style.display = 'none';
+            }
+
+            let audioContext;
+            let visualizationSetup;
+            let workletNode;
+
+            async function startRecording() {
+                try {
+                    startButton.disabled = true;
+                    stopButton.disabled = false;
+
+                    if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                        await connectWebSocket();
+                    }
+
+                    audioStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000 } });
+                    audioContext = new AudioContext({ sampleRate: 16000 });
+
+                    // Create and load the audio worklet
+                    const blob = new Blob([processorCode], { type: 'application/javascript' });
+                    const url = URL.createObjectURL(blob);
+                    await audioContext.audioWorklet.addModule(url);
+                    URL.revokeObjectURL(url);
+
+                    const audioSource = audioContext.createMediaStreamSource(audioStream);
+                    visualizationSetup = setupWaveVisualization(audioContext, audioSource);
+
+                    // Create and connect the worklet node
+                    workletNode = new AudioWorkletNode(audioContext, 'audio-processor');
+                    audioSource.connect(visualizationSetup.analyser);
+                    visualizationSetup.analyser.connect(workletNode);
+                    workletNode.connect(audioContext.destination);
+
+                    // Handle the audio data from the worklet
+                    workletNode.port.onmessage = (event) => {
+                        if (websocket && websocket.readyState === WebSocket.OPEN) {
+                            const audioBuffer = event.data;
+                            const inputData = Float32ArrayTo16BitPCM(audioBuffer);
+                            websocket.send(inputData);
+                        }
+                    };
+
+                } catch (error) {
+                    console.error('Error starting recording:', error);
+                    resetUIState();
+                }
+            }
+
+            function stopRecording() {
+                startButton.disabled = false;
+                stopButton.disabled = true;
+
+                if (workletNode) {
+                    workletNode.disconnect();
+                    workletNode = null;
+                }
+
+                if (visualizationSetup) {
+                    visualizationSetup.cancelAnimation();
+                    visualizationSetup = null;
+                }
+
+                if (audioStream) {
+                    audioStream.getTracks().forEach(track => track.stop());
+                    audioStream = null;
+                }
+
+                if (audioContext) {
+                    audioContext.close().then(() => {
+                        audioContext = null;
+                    });
+                }
+
+                if (websocket) {
+                    reconnectAttempts = MAX_RECONNECT_ATTEMPTS;
+                    websocket.close();
+                    websocket = null;
+                }
+
+                document.querySelector('.left').classList.remove('active');
+                document.querySelector('.right').classList.remove('active');
+            }
+
+            connectWebSocket();
+        </script>
+    </div>
+</body>
+
+</html>

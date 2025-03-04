@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Capture</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            font-family: 'Arial', sans-serif;
+        }
+
+        .container {
+            height: 60vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+            gap: 4rem;
+        }
+
+        .left, .right {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s ease;
+        }
+
+        .left:hover, .right:hover {
+            transform: translateY(-5px);
+        }
+
+        .avatar {
+            width: 200px;
+            height: 200px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            padding: 1rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .avatar img {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 4px solid white;
+        }
+
+        .name {
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        button {
+            padding: 0.8rem 2rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 50px;
+            background: white;
+            color: #1e3c72;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .active::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 300%;
+            height: 300%;
+            background: rgba(46, 213, 115, 0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            animation: ripple 1.5s ease-out infinite;
+            z-index: -1;
+        }
+
+        .left.active .name {
+            color: #ff0000;
+        }
+
+        .right.active .name {
+            color: #4CAF50;
+        }
+
+        @keyframes ripple {
+            0% {
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 1;
+            }
+            100% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0;
+            }
+        }
+
+        footer {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            display: flex;
+            justify-content: center;
+        }
+
+        .logo img {
+            height: 40px;
+            filter: brightness(1.2);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="left">
+            <div class="avatar">
+                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="Fake Avatar">
+            </div>
+            <div class="name">FAKE</div>
+        </div>
+        <div class="right">
+            <div class="avatar">
+                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=John" alt="Real Avatar">
+            </div>
+            <div class="name">REAL</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="startButton" >Start Recording</button>
+        <button id="stopButton" disabled>Stop Recording</button>
+    </div>
+
+    <footer>
+        <div class="logo">
+            <img src="https://www.meeamitech.com/_next/static/media/MEEAMI_BLACK.5a633273.svg" alt="Meeami Logo">
+        </div>
+    </footer>
+
+    <script>
+        let audioStream;
+        let websocket;
+
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+
+        startButton.addEventListener('click', startRecording);
+        stopButton.addEventListener('click', stopRecording);
+
+        function Float32ArrayTo16BitPCM(buffer) {
+            const output = new Int16Array(buffer.length);
+
+            for (let i = 0; i < buffer.length; i++) {
+                const s = Math.max(-1, Math.min(1, buffer[i]));
+                output[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            }
+
+            return output.buffer;
+        }
+
+        function connectWebSocket() {
+            websocket = new WebSocket('ws://64.74.143.76:8015');
+            
+            websocket.onopen = function () {
+                console.log('WebSocket connection established.');
+            };
+            websocket.onmessage = function (event) {
+                console.log(event);
+                const leftDiv = document.querySelector('.left');
+                const rightDiv = document.querySelector('.right');
+                if (String(event.data).toLowerCase() === 'fake') {
+                    leftDiv.classList.add('active');
+                    rightDiv.classList.remove('active');
+                } else if (String(event.data).toLowerCase() === 'real') {
+                    rightDiv.classList.add('active');
+                    leftDiv.classList.remove('active');
+                } else {
+                    leftDiv.classList.remove('active');
+                    rightDiv.classList.remove('active');
+                }
+            };
+            websocket.onclose = function () {
+                console.log('WebSocket connection closed.');
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                stopRecording();
+            };
+        }
+
+        async function startRecording() {
+            try {
+                stopButton.disabled = false;
+                audioStream = await navigator.mediaDevices.getUserMedia({ audio:  { sampleRate: 16000 } });
+                const audioContext = new AudioContext({ sampleRate: 16000 });
+                const audioSource = audioContext.createMediaStreamSource(audioStream);
+                const scriptNode = audioContext.createScriptProcessor(2048, 1, 1);
+
+                scriptNode.onaudioprocess = function (audioProcessingEvent) {
+                    const inputBuffer = audioProcessingEvent.inputBuffer;
+                    const audioBuffer = inputBuffer.getChannelData(0);
+                    const inputData = Float32ArrayTo16BitPCM(audioBuffer);
+
+                    if (websocket && websocket.readyState === WebSocket.OPEN) {
+                        websocket.send(inputData);
+                    }
+                };
+
+                audioSource.connect(scriptNode);
+                scriptNode.connect(audioContext.destination);
+
+            } catch (error) {
+                console.error('Error starting recording:', error);
+            }
+        }
+
+        function stopRecording() {
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+            }
+            if (websocket) {
+                websocket.close();
+                startButton.disabled = false;
+            }
+            const leftDiv = document.querySelector('.left');
+            const rightDiv = document.querySelector('.right');
+            leftDiv.classList.remove('active');
+            rightDiv.classList.remove('active');
+        }
+
+        connectWebSocket();
+    </script>
+</body>
+
+</html>
