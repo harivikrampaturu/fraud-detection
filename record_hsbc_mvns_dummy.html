@@ -23,7 +23,8 @@
             gap: 4rem;
         }
 
-        .left, .right {
+        .left,
+        .right {
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -36,7 +37,8 @@
             transition: transform 0.3s ease;
         }
 
-        .left:hover, .right:hover {
+        .left:hover,
+        .right:hover {
             transform: translateY(-5px);
         }
 
@@ -123,6 +125,7 @@
                 transform: translate(-50%, -50%) scale(0);
                 opacity: 1;
             }
+
             100% {
                 transform: translate(-50%, -50%) scale(1);
                 opacity: 0;
@@ -163,7 +166,7 @@
     </div>
 
     <div class="controls">
-        <button id="startButton" >Start Recording</button>
+        <button id="startButton">Start Recording</button>
         <button id="stopButton" disabled>Stop Recording</button>
     </div>
 
@@ -176,6 +179,7 @@
     <script>
         let audioStream;
         let websocket;
+        let audioWorkletNode;
 
         const startButton = document.getElementById('startButton');
         const stopButton = document.getElementById('stopButton');
@@ -196,7 +200,7 @@
 
         function connectWebSocket() {
             websocket = new WebSocket('ws://64.74.143.76:8014');
-            
+
             websocket.onopen = function () {
                 console.log('WebSocket connection established.');
             };
@@ -223,26 +227,79 @@
             };
         }
 
+        async function audioBufferToBase64(audioBuffer) {
+            const blob = new Blob([audioBuffer], { type: "audio/pcm" });
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(",")[1]); // Remove data URI prefix
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        // Add the AudioWorklet processor code
+        const workletCode = `
+            class AudioProcessor extends AudioWorkletProcessor {
+                    constructor() {
+                        super();
+                        this.bufferSize = 2048;  // Changed from 4096 to 2048
+                        this.buffer = new Float32Array(this.bufferSize);
+                        this.bufferIndex = 0;
+                    }
+
+                    process(inputs, outputs, parameters) {
+                        const input = inputs[0][0];
+                        if (!input) return true;
+
+                        // Fill the buffer
+                        for (let i = 0; i < input.length; i++) {
+                            this.buffer[this.bufferIndex++] = input[i];
+                            
+                            // When buffer is full, send it
+                            if (this.bufferIndex >= this.bufferSize) {
+                                this.port.postMessage(this.buffer.slice());
+                                this.bufferIndex = 0;
+                            }
+                        }
+                        return true;
+                    }
+                }
+                registerProcessor('audio-processor', AudioProcessor);
+        `;
+
+        // Create a Blob URL for the worklet code
+        const blob = new Blob([workletCode], { type: 'text/javascript' });
+        const workletUrl = URL.createObjectURL(blob);
+
         async function startRecording() {
             try {
                 stopButton.disabled = false;
-                audioStream = await navigator.mediaDevices.getUserMedia({ audio:  { sampleRate: 16000 } });
+                audioStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000 } });
                 const audioContext = new AudioContext({ sampleRate: 16000 });
-                const audioSource = audioContext.createMediaStreamSource(audioStream);
-                const scriptNode = audioContext.createScriptProcessor(2048, 1, 1);
 
-                scriptNode.onaudioprocess = function (audioProcessingEvent) {
-                    const inputBuffer = audioProcessingEvent.inputBuffer;
-                    const audioBuffer = inputBuffer.getChannelData(0);
-                    const inputData = Float32ArrayTo16BitPCM(audioBuffer);
+                // Add the audio worklet module
+                await audioContext.audioWorklet.addModule(workletUrl);
+
+                const audioSource = audioContext.createMediaStreamSource(audioStream);
+                audioWorkletNode = new AudioWorkletNode(audioContext, 'audio-processor');
+
+                audioWorkletNode.port.onmessage = async (event) => {
+                    const audioBuffer = event.data;
+                    const inputData = await Float32ArrayTo16BitPCM(audioBuffer);
+                    const audioBase64 = await audioBufferToBase64(inputData);
+
+                    const message = {
+                        id: "user_123",
+                        audio: audioBase64
+                    };
 
                     if (websocket && websocket.readyState === WebSocket.OPEN) {
-                        websocket.send(inputData);
+                        websocket.send(JSON.stringify(message));
                     }
                 };
 
-                audioSource.connect(scriptNode);
-                scriptNode.connect(audioContext.destination);
+                audioSource.connect(audioWorkletNode);
+                audioWorkletNode.connect(audioContext.destination);
 
             } catch (error) {
                 console.error('Error starting recording:', error);
@@ -252,6 +309,9 @@
         function stopRecording() {
             if (audioStream) {
                 audioStream.getTracks().forEach(track => track.stop());
+            }
+            if (audioWorkletNode) {
+                audioWorkletNode.disconnect();
             }
             if (websocket) {
                 websocket.close();

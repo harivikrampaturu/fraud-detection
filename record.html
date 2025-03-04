@@ -23,22 +23,21 @@
             gap: 4rem;
         }
 
-        .left,
-        .right {
+        .left {
             flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 1.5rem;
             padding: 2rem;
-            background: rgba(255, 255, 255, 0.1);
+            /* background: rgba(255, 255, 255, 0.1); */
             border-radius: 20px;
             backdrop-filter: blur(10px);
             transition: transform 0.3s ease;
+            display: none;
         }
 
-        .left:hover,
-        .right:hover {
+        .left:hover {
             transform: translateY(-5px);
         }
 
@@ -73,7 +72,7 @@
             display: flex;
             justify-content: center;
             gap: 1rem;
-            margin-top: 2rem;
+            margin: 1rem 0;
         }
 
         button {
@@ -99,7 +98,7 @@
         }
 
         .active::after {
-            content: '';
+            /* content: '';
             position: absolute;
             top: 50%;
             left: 50%;
@@ -110,14 +109,15 @@
             transform: translate(-50%, -50%) scale(0);
             animation: ripple 0.5s ease-out infinite;
             z-index: -1;
+            */
         }
 
         .left.active .name {
             color: #ff0000;
         }
 
-        .right.active .name {
-            color: #4CAF50;
+        .toast {
+            display: none;
         }
 
         @keyframes ripple {
@@ -130,6 +130,20 @@
                 transform: translate(-50%, -50%) scale(1);
                 opacity: 0;
             }
+        }
+
+        .toast {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #ff0000;
+            color: white;
+            padding: 1rem;
+            border-radius: 5px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            text-align: center;
         }
 
         footer {
@@ -221,11 +235,13 @@
             width: 100%;
             height: 150px;
             margin-top: 27px;
+            display: block;
         }
 
         #waveCanvas {
             width: 100%;
             height: 100%;
+            display: block;
         }
 
         footer {
@@ -238,71 +254,253 @@
             justify-content: center;
             margin-top: 0;
         }
+
+        #enroll-container {
+            display: none;
+        }
+
+        #enroll-container button {
+            padding: 0.8rem 2rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 50px;
+            background: white;
+        }
+
+        #call-container {
+            display: none;
+        }
+
+        #enrolledIdContainer {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-direction: column-reverse
+        }
+
+        .sample-text-container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2rem;
+            border-radius: 15px;
+            margin-bottom: 2rem;
+            backdrop-filter: blur(10px);
+            max-width: 600px;
+            text-align: center;
+        }
+
+        .sample-text-container h3 {
+            color: white;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }
+
+        .sample-text {
+            color: #e0e0e0;
+            font-size: 1.1rem;
+            line-height: 1.6;
+            margin: 0;
+        }
     </style>
+    <script>
+        // Keep only one set of global variable declarations at the top
+        let audioContext;
+        let audioStream;
+        let websocket;
+        let workletNode;
+        let visualizationSetup;
+        let waveAnimationId = null;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 5;
+
+        // Add missing audio buffer conversion function
+        async function audioBufferToBase64(audioBuffer) {
+            const blob = new Blob([audioBuffer], { type: "audio/pcm" });
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(",")[1]); // Remove data URI prefix
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        // Add missing Float32ArrayTo16BitPCM function
+        function Float32ArrayTo16BitPCM(buffer) {
+            const output = new Int16Array(buffer.length);
+            for (let i = 0; i < buffer.length; i++) {
+                const s = Math.max(-1, Math.min(1, buffer[i]));
+                output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return output.buffer;
+        }
+
+        // Add missing audio processor code
+        processorCode = `
+            class AudioProcessor extends AudioWorkletProcessor {
+                constructor() {
+                    super();
+                    this.bufferSize = 2048;  // Consistent buffer size
+                    this.buffer = new Float32Array(this.bufferSize);
+                    this.bufferIndex = 0;
+                }
+
+                process(inputs, outputs, parameters) {
+                    const input = inputs[0][0];
+                    if (!input) return true;
+
+                    // Fill the buffer
+                    for (let i = 0; i < input.length; i++) {
+                        this.buffer[this.bufferIndex++] = input[i];
+                        
+                        // When buffer is full, send it
+                        if (this.bufferIndex >= this.bufferSize) {
+                            this.port.postMessage(this.buffer.slice());
+                            this.bufferIndex = 0;
+                        }
+                    }
+                    return true;
+                }
+            }
+            registerProcessor('audio-processor', AudioProcessor);
+        `;
+
+        // Add missing wave visualization setup
+        function setupWaveVisualization(audioContext, audioSource) {
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+
+            audioSource.connect(analyser);
+
+            const canvas = document.getElementById('waveCanvas');
+            const canvasCtx = canvas.getContext('2d');
+
+            // Fix canvas sizing
+            function resizeCanvas() {
+                // Get the display width and height
+                const displayWidth = canvas.clientWidth;
+                const displayHeight = canvas.clientHeight;
+
+                // Set actual pixel dimensions accounting for device pixel ratio
+                const scale = window.devicePixelRatio;
+                canvas.width = displayWidth * scale;
+                canvas.height = displayHeight * scale;
+
+                // Scale the context to ensure correct drawing operations
+                canvasCtx.scale(scale, scale);
+            }
+
+            // Call resize initially and add listener
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            function drawWave() {
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteTimeDomainData(dataArray);
+
+                // Clear the entire canvas with proper dimensions
+                canvasCtx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+
+                canvasCtx.fillStyle = 'rgba(30, 60, 114, 0.2)';
+                canvasCtx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+
+                canvasCtx.lineWidth = 2;
+                const leftDiv = document.querySelector('.left');
+                canvasCtx.strokeStyle = leftDiv.classList.contains('active') ? '#ff0000' : '#ffffff';
+                canvasCtx.beginPath();
+
+                const sliceWidth = canvas.clientWidth / bufferLength;
+                let x = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    const v = dataArray[i] / 128.0;
+                    const y = v * canvas.clientHeight / 2;
+
+                    if (i === 0) {
+                        canvasCtx.moveTo(x, y);
+                    } else {
+                        canvasCtx.lineTo(x, y);
+                    }
+
+                    x += sliceWidth;
+                }
+
+                canvasCtx.lineTo(canvas.clientWidth, canvas.clientHeight / 2);
+                canvasCtx.stroke();
+
+                waveAnimationId = requestAnimationFrame(drawWave);
+            }
+
+            drawWave();
+            return { analyser, cancelAnimation: () => cancelAnimationFrame(waveAnimationId) };
+        }
+
+        const isEnrolled = () => {
+            return localStorage.getItem('enrolled') !== null;
+        }
+
+        const getEnrolledId = () => {
+            return localStorage.getItem('enrolled');
+        }
+
+        const getDeepfakeDetection = () => {
+            return localStorage.getItem('deepfakeDetection') === 'true';
+        }
+
+        const randomId = () => {
+            return Math.random().toString(12).substring(2, 10);
+        }
+    </script>
 </head>
 
 <body>
+
     <div id="enroll-container">
-        
-    </div>    
+        <div class="container">
+            <!-- Add sample text container -->
+            <div class="sample-text-container">
+                <h3>Please read the following text for enrollment:</h3>
+                <p class="sample-text">
+                    "Hello, I am enrolling my voice for secure authentication.
+                    My voice is my password, and I understand that this system
+                    helps protect against voice spoofing and deepfake attacks.
+                    Thank you for helping keep my account secure."
+                </p>
+            </div>
+            <button id="enrollButton">Enroll</button>
+        </div>
+    </div>
+    <div class="wave">
+        <canvas id="waveCanvas"></canvas>
+    </div>
 
     <div id="call-container">
         <div class="container">
             <div class="left">
-                <div class="avatar">
-                    <svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-                        <!-- Face background -->
-                        <circle cx="60" cy="60" r="50" fill="#FF6B6B" />
-                        <!-- Eyes -->
-                        <circle cx="40" cy="50" r="6" fill="white" />
-                        <circle cx="80" cy="50" r="6" fill="white" />
-                        <!-- Eyebrows -->
-                        <path d="M35 40 Q40 35 45 40" stroke="white" stroke-width="3" fill="none" />
-                        <path d="M75 40 Q80 35 85 40" stroke="white" stroke-width="3" fill="none" />
-                        <!-- Sad mouth -->
-                        <path d="M40 80 Q60 70 80 80" stroke="white" stroke-width="3" fill="none" />
-                        <!-- Robot-like details -->
-                        <path d="M20 60 L30 60" stroke="white" stroke-width="2" />
-                        <path d="M90 60 L100 60" stroke="white" stroke-width="2" />
-                        <circle cx="60" cy="60" r="55" stroke="white" stroke-width="2" fill="none" stroke-dasharray="5,5" />
-                    </svg>
-                </div>
-                <div class="name">FAKE</div>
+
             </div>
-            <div class="right">
-                <div class="avatar">
-                    <svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-                        <!-- Face background -->
-                        <circle cx="60" cy="60" r="50" fill="#4CAF50" />
-                        <!-- Eyes -->
-                        <circle cx="40" cy="50" r="6" fill="white" />
-                        <circle cx="80" cy="50" r="6" fill="white" />
-                        <!-- Eyebrows -->
-                        <path d="M35 38 Q40 35 45 38" stroke="white" stroke-width="3" fill="none" />
-                        <path d="M75 38 Q80 35 85 38" stroke="white" stroke-width="3" fill="none" />
-                        <!-- Happy mouth -->
-                        <path d="M40 70 Q60 85 80 70" stroke="white" stroke-width="3" fill="none" />
-                        <!-- Natural face details -->
-                        <path d="M30 60 Q60 120 90 60" stroke="white" stroke-width="2" fill="none" opacity="0.3" />
-                        <circle cx="60" cy="60" r="55" stroke="white" stroke-width="2" fill="none" />
-                    </svg>
-                </div>
-                <div class="name">REAL</div>
+            <!-- a toast fake detected -->
+            <div class="toast">
+                <p>Fake detected</p>
             </div>
+
+
         </div>
 
-        <div class="controls">
-            <button id="startButton">Start Recording</button>
-            <button id="stopButton" disabled>Stop Recording</button>
-        </div>
-
-        <div class="wave">
-            <canvas id="waveCanvas"></canvas>
-        </div>
 
         <footer>
-            <div class="logo">
-                <img src="https://www.meeamitech.com/_next/static/media/MEEAMI_BLACK.5a633273.svg" alt="Meeami Logo">
+            <div id="enrolledIdContainer">
+                <!-- show the enrolled id -->
+                <p>Enrolled ID: <span id="enrolledId"></span></p>
+                <button id="deleteEnrolledId">Re-Enroll</button>
+            </div>
+            <div class="controls">
+                <button id="startButton">Call</button>
+                <button id="stopButton" disabled>End Call</button>
             </div>
             <div class="switch-container">
                 <span class="switch-label">Spoofing Detection</span>
@@ -314,12 +512,311 @@
         </footer>
 
         <script>
+            // Add event listeners for start and stop buttons
+            document.addEventListener('DOMContentLoaded', function () {
+                // Existing listeners
+                const enrollButton = document.getElementById('enrollButton');
+                enrollButton.addEventListener('click', startEnrollRecording);
+
+                // Add start and stop button listeners
+                const startButton = document.getElementById('startButton');
+                const stopButton = document.getElementById('stopButton');
+
+                startButton.addEventListener('click', async () => {
+                    try {
+                        await startRecording();
+                        startButton.disabled = true;
+                        stopButton.disabled = false;
+                        document.querySelector('.left').classList.remove('active');
+                    } catch (error) {
+                        console.error('Error starting recording:', error);
+                        alert('Failed to start recording. Please try again.');
+                    }
+                });
+
+                stopButton.addEventListener('click', () => {
+                    stopRecording();
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                    document.querySelector('.left').classList.remove('active');
+                });
+
+                // Initialize deepfake detection switch
+                const fakeButton = document.getElementById('fakeButton');
+                fakeButton.checked = getDeepfakeDetection();
+
+                // Initial state setup
+                if (isEnrolled()) {
+                    switchToCallState(getEnrolledId());
+                } else {
+                    switchToEnrollState();
+                }
+            });
+
+            // Update startEnrollRecording function to include console logs for debugging
+            async function startEnrollRecording() {
+                try {
+                    console.log('Starting enrollment recording...');
+                    const enrollButton = document.getElementById('enrollButton');
+                    enrollButton.disabled = true;
+                    document.querySelector('.wave').style.display = 'block';
+
+                    // Generate and store new ID
+                    const id = randomId();
+                    console.log('Generated ID:', id);
+                    localStorage.setItem('enrolled', id);
+
+                    // Connect to enrollment WebSocket first
+                    console.log('Connecting to enrollment WebSocket...');
+                    await connectEnrollWebSocket();
+
+                    // Then setup audio recording
+                    console.log('Setting up audio recording...');
+                    await setupAudioRecording();
+
+                    console.log('Enrollment recording started successfully');
+                } catch (error) {
+                    console.error('Error in enrollment:', error);
+                    stopEnrollRecording();
+                    alert('Failed to start enrollment. Please try again.');
+
+                    // Re-enable the button on error
+                    const enrollButton = document.getElementById('enrollButton');
+                    enrollButton.disabled = false;
+                }
+            }
+
+            // Make sure connectEnrollWebSocket is properly defined
+            function connectEnrollWebSocket() {
+                return new Promise((resolve, reject) => {
+                    const url = 'ws://64.74.143.76:8014';
+                    websocket = new WebSocket(url);
+
+                    websocket.onopen = function () {
+                        console.log('Enrollment WebSocket connection established');
+                        reconnectAttempts = 0;
+                        resolve();
+                    };
+
+                    websocket.onerror = function (error) {
+                        console.error('Enrollment WebSocket error:', error);
+                        reject(error);
+                    };
+
+                    websocket.onmessage = function (event) {
+                        console.log('Enrollment message:', event.data);
+                        if (String(event.data).toLowerCase() === 'enroll_success') {
+                            console.log('Enrollment successful');
+                            const enrolledId = localStorage.getItem('enrolled');
+                            stopEnrollRecording();
+                            // Add page refresh after successful enrollment
+                            alert('Enrollment successful! The page will refresh.');
+                            window.location.reload();
+                        } else if (String(event.data).toLowerCase() === 'enroll_fail') {
+                            console.log('Enrollment failed');
+                            stopEnrollRecording();
+                            switchToEnrollState();
+                            alert('Enrollment Failed. Please retry.');
+                        }
+                    };
+
+                    websocket.onclose = function () {
+                        console.log('Enrollment WebSocket closed');
+                        if (document.getElementById('enroll-container').style.display === 'block') {
+                            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                                reconnectAttempts++;
+                                setTimeout(() => connectEnrollWebSocket().catch(reject), 1000 * reconnectAttempts);
+                            } else {
+                                reject(new Error('Max reconnection attempts reached'));
+                            }
+                        }
+                    };
+                });
+            }
+
+            // 2. Improve WebSocket connection management
+            function connectWebSocket() {
+                if (websocket) {
+                    websocket.close();
+                    websocket = null;
+                }
+
+                const deepfakeDetection = getDeepfakeDetection();
+                const enrolledId = getEnrolledId();
+
+                if (!enrolledId) {
+                    console.error('No enrolled ID found');
+                    return;
+                }
+
+                const url = deepfakeDetection
+                    ? `ws://64.74.143.76:8017?id=${enrolledId}`
+                    : `ws://64.74.143.76:8015?id=${enrolledId}`;
+
+                websocket = new WebSocket(url);
+                setupWebSocketHandlers();
+            }
+
+            // 3. Improve enrollment flow
+            async function setupAudioRecording() {
+                try {
+                    audioStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000 } });
+                    audioContext = new AudioContext({ sampleRate: 16000 });
+
+                    // Create and load the audio worklet
+                    const blob = new Blob([processorCode], { type: 'application/javascript' });
+                    const url = URL.createObjectURL(blob);
+                    await audioContext.audioWorklet.addModule(url);
+                    URL.revokeObjectURL(url);
+
+                    const audioSource = audioContext.createMediaStreamSource(audioStream);
+                    visualizationSetup = setupWaveVisualization(audioContext, audioSource);
+
+                    // Create and connect the worklet node
+                    workletNode = new AudioWorkletNode(audioContext, 'audio-processor');
+                    audioSource.connect(visualizationSetup.analyser);
+                    visualizationSetup.analyser.connect(workletNode);
+                    workletNode.connect(audioContext.destination);
+
+                    // Handle the audio data from the worklet
+                    workletNode.port.onmessage = async (event) => {
+                        if (websocket && websocket.readyState === WebSocket.OPEN) {
+                            const audioBuffer = event.data;
+                            const inputData = Float32ArrayTo16BitPCM(audioBuffer);
+                            const base64Audio = await audioBufferToBase64(inputData);
+                            const message = { audio: base64Audio, id: getEnrolledId() };
+                            websocket.send(JSON.stringify(message));
+                        }
+                    };
+
+                } catch (error) {
+                    console.error('Error setting up audio recording:', error);
+                    throw error;
+                }
+            }
+
+            // 4. Improve state transitions
+            function switchToCallState(enrolledId) {
+                resetAllState();
+
+                // Update UI
+                document.getElementById('enroll-container').style.display = 'none';
+                document.getElementById('call-container').style.display = 'block';
+                document.getElementById('enrolledId').innerText = enrolledId;
+                document.querySelector('.left').style.display = 'flex';
+
+                // Setup call state
+                startButton.disabled = false;
+                stopButton.disabled = true;
+
+                // Connect WebSocket for calling
+                connectWebSocket();
+            }
+
+            function switchToEnrollState() {
+                resetAllState();
+
+                // Update UI
+                document.getElementById('enroll-container').style.display = 'block';
+                document.getElementById('call-container').style.display = 'none';
+                document.querySelector('.left').style.display = 'none';
+
+                // Clear enrollment data
+                localStorage.removeItem('enrolled');
+                document.getElementById('enrolledId').innerText = '';
+
+                // Reset enrollment button
+                enrollButton.disabled = false;
+            }
+
+            // 5. Improve cleanup
+            function resetAllState() {
+                stopRecording();
+                stopEnrollRecording();
+                resetUIState();
+
+                if (websocket) {
+                    websocket.close();
+                    websocket = null;
+                }
+
+                // Reset wave visualization
+                document.querySelector('.wave').style.display = 'none';
+                if (waveAnimationId) {
+                    cancelAnimationFrame(waveAnimationId);
+                    waveAnimationId = null;
+                }
+
+                // Reset audio context and stream
+                if (audioContext) {
+                    audioContext.close();
+                    audioContext = null;
+                }
+
+                if (audioStream) {
+                    audioStream.getTracks().forEach(track => track.stop());
+                    audioStream = null;
+                }
+            }
+
+            // 6. Improve WebSocket message handling
+            function setupWebSocketHandlers() {
+                websocket.onopen = function () {
+                    console.log('WebSocket connection established');
+                    reconnectAttempts = 0;
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+
+                    // Setup heartbeat
+                    const heartbeat = setInterval(() => {
+                        if (websocket?.readyState === WebSocket.OPEN) {
+                            websocket.send(JSON.stringify({ type: 'ping' }));
+                        } else {
+                            clearInterval(heartbeat);
+                        }
+                    }, 5000);
+
+                    websocket.addEventListener('close', () => clearInterval(heartbeat));
+                };
+
+                websocket.onclose = function () {
+                    console.log('WebSocket connection closed');
+                    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                        reconnectAttempts++;
+                        setTimeout(connectWebSocket, 1000 * reconnectAttempts);
+                    }
+                };
+
+                websocket.onmessage = function (event) {
+                    console.log('WebSocket message:', event.data);
+                    if (String(event.data).toLowerCase() === 'fake') {
+                        document.querySelector('.left').classList.add('active');
+                    } else {
+                        document.querySelector('.left').classList.remove('active');
+                    }
+                };
+
+                websocket.onerror = function (error) {
+                    console.error('WebSocket error:', error);
+                    resetUIState();
+                };
+            }
+
+            const enrolledId = getEnrolledId();
+            document.getElementById('enrolledId').innerText = enrolledId;
+
+            const deleteEnrolledId = () => {
+                switchToEnrollState();
+            }
+
+            document.getElementById('deleteEnrolledId').addEventListener('click', deleteEnrolledId);
+
             // Update the processor code to handle the audio data properly
-            const processorCode = `
+            processorCode = `
                 class AudioProcessor extends AudioWorkletProcessor {
                     constructor() {
                         super();
-                        this.bufferSize = 2048;  // Changed from 4096 to 2048
+                        this.bufferSize = 2048;  // Consistent buffer size
                         this.buffer = new Float32Array(this.bufferSize);
                         this.bufferIndex = 0;
                     }
@@ -344,190 +841,54 @@
                 registerProcessor('audio-processor', AudioProcessor);
             `;
 
-            let audioStream;
-            let websocket;
-            let reconnectAttempts = 0;
-            const MAX_RECONNECT_ATTEMPTS = 5;
-            const getDeepfakeDetection = () => {
-                return localStorage.getItem('deepfakeDetection') === 'true';
-            }
-            let deepfakeDetection = getDeepfakeDetection();
-            let fakeButton = document.getElementById('fakeButton');
-            fakeButton.checked = getDeepfakeDetection();
-
-            fakeButton.addEventListener('change', () => {
-                const newState = fakeButton.checked;
-                localStorage.setItem('deepfakeDetection', newState);
-
-
-
-                if (websocket) {
-                    websocket.close();
-                    websocket = null;
-                    resetUIState();
+            // Update deepfake detection toggle handler
+            document.getElementById('fakeButton').addEventListener('change', function (e) {
+                localStorage.setItem('deepfakeDetection', e.target.checked);
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    // Reconnect to switch between detection modes
                     connectWebSocket();
                 }
             });
-
-            const startButton = document.getElementById('startButton');
-            const stopButton = document.getElementById('stopButton');
-
-            startButton.addEventListener('click', startRecording);
-            stopButton.addEventListener('click', stopRecording);
-
-            // Update the Float32ArrayTo16BitPCM function to ensure correct conversion
-            function Float32ArrayTo16BitPCM(buffer) {
-                const output = new Int16Array(buffer.length);
-                for (let i = 0; i < buffer.length; i++) {
-                    const s = Math.max(-1, Math.min(1, buffer[i]));
-                    if (s < 0) {
-                        output[i] = s * 0x8000;
-                    } else {
-                        output[i] = s * 0x7FFF;
-                    }
-                }
-                return output.buffer;
-            }
-
-            let waveAnimationId = null;
-
-            function setupWaveVisualization(audioContext, audioSource) {
-                const analyser = audioContext.createAnalyser();
-                analyser.fftSize = 2048;
-
-                audioSource.connect(analyser);
-
-                const canvas = document.getElementById('waveCanvas');
-                const canvasCtx = canvas.getContext('2d');
-
-                canvas.width = canvas.offsetWidth;
-                canvas.height = canvas.offsetHeight;
-
-                window.addEventListener('resize', () => {
-                    canvas.width = canvas.offsetWidth;
-                    canvas.height = canvas.offsetHeight;
-                });
-
-                function drawWave() {
-                    const bufferLength = analyser.frequencyBinCount;
-                    const dataArray = new Uint8Array(bufferLength);
-                    analyser.getByteTimeDomainData(dataArray);
-
-                    canvasCtx.fillStyle = 'rgba(30, 60, 114, 0.2)';
-                    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-                    canvasCtx.lineWidth = 2;
-                    canvasCtx.strokeStyle = '#ffffff';
-                    canvasCtx.beginPath();
-
-                    const sliceWidth = canvas.width * 1.0 / bufferLength;
-                    let x = 0;
-
-                    for (let i = 0; i < bufferLength; i++) {
-                        const v = dataArray[i] / 128.0;
-                        const y = v * canvas.height / 2;
-
-                        if (i === 0) {
-                            canvasCtx.moveTo(x, y);
-                        } else {
-                            canvasCtx.lineTo(x, y);
-                        }
-
-                        x += sliceWidth;
-                    }
-
-                    canvasCtx.lineTo(canvas.width, canvas.height / 2);
-                    canvasCtx.stroke();
-
-                    if (!stopButton.disabled) {
-                        waveAnimationId = requestAnimationFrame(drawWave);
-                    }
-                }
-
-                drawWave();
-                document.querySelector('.wave').style.display = 'block';
-
-                return { analyser, cancelAnimation: () => cancelAnimationFrame(waveAnimationId) };
-            }
-
-            function connectWebSocket() {
-                const deepfakeDetection = getDeepfakeDetection();
-                websocket = new WebSocket(deepfakeDetection ? 'ws://64.74.143.76:8017' : 'ws://64.74.143.76:8015');
-
-                websocket.onopen = function () {
-                    console.log('WebSocket connection established. with deepfakeDetection: ', deepfakeDetection);
-                    reconnectAttempts = 0;
-                    startButton.disabled = false;
-                    stopButton.disabled = true;
-                };
-
-                websocket.onerror = function (error) {
-                    console.error('WebSocket error:', error);
-                    resetUIState();
-                };
-
-                websocket.onmessage = function (event) {
-                    console.log(event);
-                    const leftDiv = document.querySelector('.left');
-                    const rightDiv = document.querySelector('.right');
-                    if (String(event.data).toLowerCase() === 'fake') {
-                        leftDiv.classList.add('active');
-                        rightDiv.classList.remove('active');
-                    }
-                    /*     else if (String(event.data).toLowerCase() === 'real') {
-                            rightDiv.classList.add('active');
-                            leftDiv.classList.remove('active');
-                        }  */
-                    else {
-                        leftDiv.classList.remove('active');
-                        rightDiv.classList.remove('active');
-                    }
-                };
-
-                websocket.onclose = function () {
-                    console.log('WebSocket connection closed.');
-                    resetUIState();
-
-                    // Attempt to reconnect
-                    if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                        reconnectAttempts++;
-                        console.log(`Attempting to reconnect... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-                        setTimeout(connectWebSocket, 2000);
-                    }
-                };
-            }
 
             function resetUIState() {
                 startButton.disabled = false;
                 stopButton.disabled = true;
                 const leftDiv = document.querySelector('.left');
-                const rightDiv = document.querySelector('.right');
                 leftDiv.classList.remove('active');
-                rightDiv.classList.remove('active');
-
+                document.querySelector('.toast').style.display = 'none';
                 if (audioStream) {
                     audioStream.getTracks().forEach(track => track.stop());
                 }
 
-                // Cancel wave animation if it exists
+                // Keep wave visible but stop the animation
                 if (waveAnimationId) {
                     cancelAnimationFrame(waveAnimationId);
                     waveAnimationId = null;
                 }
-                document.querySelector('.wave').style.display = 'none';
             }
 
-            let audioContext;
-            let visualizationSetup;
-            let workletNode;
-
+            // Update startRecording function to properly handle wave visualization
             async function startRecording() {
                 try {
-                    startButton.disabled = true;
-                    stopButton.disabled = false;
+                    if (!isEnrolled()) {
+                        alert('Please enroll first');
+                        return;
+                    }
 
                     if (!websocket || websocket.readyState !== WebSocket.OPEN) {
                         await connectWebSocket();
                     }
+
+                    // Make sure wave is visible BEFORE setting up audio
+                    const waveElement = document.querySelector('.wave');
+                    waveElement.style.display = 'block';
+
+                    // Force a reflow to ensure the canvas has dimensions
+                    const canvas = document.getElementById('waveCanvas');
+                    canvas.style.display = 'block';
+
+                    // Small delay to ensure CSS has been applied
+                    await new Promise(resolve => setTimeout(resolve, 10));
 
                     audioStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000 } });
                     audioContext = new AudioContext({ sampleRate: 16000 });
@@ -539,6 +900,17 @@
                     URL.revokeObjectURL(url);
 
                     const audioSource = audioContext.createMediaStreamSource(audioStream);
+
+                    // Add this right before setting up visualization
+                    console.log('Canvas dimensions:', {
+                        clientWidth: canvas.clientWidth,
+                        clientHeight: canvas.clientHeight,
+                        offsetWidth: canvas.offsetWidth,
+                        offsetHeight: canvas.offsetHeight,
+                        style: canvas.style.display
+                    });
+
+                    // Setup visualization after canvas is definitely visible
                     visualizationSetup = setupWaveVisualization(audioContext, audioSource);
 
                     // Create and connect the worklet node
@@ -548,23 +920,65 @@
                     workletNode.connect(audioContext.destination);
 
                     // Handle the audio data from the worklet
-                    workletNode.port.onmessage = (event) => {
+                    workletNode.port.onmessage = async (event) => {
                         if (websocket && websocket.readyState === WebSocket.OPEN) {
                             const audioBuffer = event.data;
                             const inputData = Float32ArrayTo16BitPCM(audioBuffer);
-                            websocket.send(inputData);
+                            const base64Audio = await audioBufferToBase64(inputData);
+                            const message = { audio: base64Audio, id: getEnrolledId() };
+                            websocket.send(JSON.stringify(message));
                         }
                     };
 
                 } catch (error) {
                     console.error('Error starting recording:', error);
                     resetUIState();
+                    throw error;
                 }
             }
 
+            // Update stopRecording to properly handle wave visualization
             function stopRecording() {
                 startButton.disabled = false;
                 stopButton.disabled = true;
+
+                if (workletNode) {
+                    workletNode.disconnect();
+                    workletNode = null;
+                }
+
+                if (visualizationSetup) {
+                    visualizationSetup.cancelAnimation();
+                    visualizationSetup = null;
+                }
+
+                if (audioStream) {
+                    audioStream.getTracks().forEach(track => track.stop());
+                    audioStream = null;
+                }
+
+                // Safely close AudioContext
+                if (audioContext?.state !== 'closed') {
+                    audioContext?.close().catch(console.error);
+                }
+                audioContext = null;
+
+                if (websocket) {
+                    reconnectAttempts = MAX_RECONNECT_ATTEMPTS;
+                    websocket.close();
+                    websocket = null;
+                }
+
+                document.querySelector('.left').classList.remove('active');
+                // Keep wave visible but stop the animation
+                if (waveAnimationId) {
+                    cancelAnimationFrame(waveAnimationId);
+                    waveAnimationId = null;
+                }
+            }
+
+            function stopEnrollRecording() {
+                enrollButton.disabled = false;
 
                 if (workletNode) {
                     workletNode.disconnect();
@@ -592,12 +1006,7 @@
                     websocket.close();
                     websocket = null;
                 }
-
-                document.querySelector('.left').classList.remove('active');
-                document.querySelector('.right').classList.remove('active');
             }
-
-            connectWebSocket();
         </script>
     </div>
 </body>
