@@ -14,8 +14,22 @@
             font-family: 'Arial', sans-serif;
         }
 
+
+
+
+        .bottom {
+            clip-path: polygon(0 100%,
+                    0 0,
+                    100% 0,
+                    100% 100%,
+                    calc(50% + var(--b) / 2) 100%,
+                    50% calc(100% + var(--h)),
+                    calc(50% - var(--b) / 2) 100%);
+        }
+
+
         .container {
-            height: 60vh;
+            height: 25vh;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -117,8 +131,20 @@
         }
 
         .toast {
-            display: none;
+            position: absolute;
+            top: 25%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #ff0000;
+            color: white;
+            padding: 0.5rem;
+            border-radius: 5px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            text-align: center;
         }
+
+
 
         @keyframes ripple {
             0% {
@@ -130,20 +156,6 @@
                 transform: translate(-50%, -50%) scale(1);
                 opacity: 0;
             }
-        }
-
-        .toast {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background-color: #ff0000;
-            color: white;
-            padding: 1rem;
-            border-radius: 5px;
-            font-size: 1.2rem;
-            font-weight: bold;
-            text-align: center;
         }
 
         footer {
@@ -248,7 +260,7 @@
             position: fixed;
             bottom: 0;
             width: 100%;
-            padding: 1rem;
+            padding: 4rem 1rem;
             background: rgba(0, 0, 0, 0.2);
             display: flex;
             justify-content: center;
@@ -256,6 +268,7 @@
         }
 
         #enroll-container {
+            padding-top: 6rem;
             display: none;
         }
 
@@ -273,14 +286,48 @@
 
         #enrolledIdContainer {
             position: absolute;
-            top: 10px;
-            left: 10px;
-            padding: 10px;
-            border-radius: 5px;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 25px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        #enrolledIdContainer p {
+            color: white;
+            margin: 0;
+            font-size: 1rem;
             display: flex;
             align-items: center;
             gap: 10px;
-            flex-direction: column-reverse
+        }
+
+        #enrolledIdContainer #enrolledId {
+            font-family: monospace;
+            background: rgba(255, 255, 255, 0.15);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        #deleteEnrolledId {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 8px 15px;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        #deleteEnrolledId:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
         }
 
         .sample-text-container {
@@ -368,7 +415,7 @@
             registerProcessor('audio-processor', AudioProcessor);
         `;
 
-        // Add missing wave visualization setup
+        // Wave visualization setup
         function setupWaveVisualization(audioContext, audioSource) {
             const analyser = audioContext.createAnalyser();
             analyser.fftSize = 2048;
@@ -380,20 +427,14 @@
 
             // Fix canvas sizing
             function resizeCanvas() {
-                // Get the display width and height
                 const displayWidth = canvas.clientWidth;
                 const displayHeight = canvas.clientHeight;
-
-                // Set actual pixel dimensions accounting for device pixel ratio
                 const scale = window.devicePixelRatio;
                 canvas.width = displayWidth * scale;
                 canvas.height = displayHeight * scale;
-
-                // Scale the context to ensure correct drawing operations
                 canvasCtx.scale(scale, scale);
             }
 
-            // Call resize initially and add listener
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
 
@@ -402,9 +443,7 @@
                 const dataArray = new Uint8Array(bufferLength);
                 analyser.getByteTimeDomainData(dataArray);
 
-                // Clear the entire canvas with proper dimensions
                 canvasCtx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-
                 canvasCtx.fillStyle = 'rgba(30, 60, 114, 0.2)';
                 canvasCtx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
 
@@ -436,7 +475,15 @@
             }
 
             drawWave();
-            return { analyser, cancelAnimation: () => cancelAnimationFrame(waveAnimationId) };
+            return {
+                analyser,
+                cancelAnimation: () => {
+                    if (waveAnimationId) {
+                        cancelAnimationFrame(waveAnimationId);
+                        waveAnimationId = null;
+                    }
+                }
+            };
         }
 
         const isEnrolled = () => {
@@ -459,6 +506,7 @@
 
 <body>
 
+    <!-- Enroll container -->
     <div id="enroll-container">
         <div class="container">
             <!-- Add sample text container -->
@@ -474,18 +522,22 @@
             <button id="enrollButton">Enroll</button>
         </div>
     </div>
-    <div class="wave">
-        <canvas id="waveCanvas"></canvas>
-    </div>
 
+    <!-- Call container -->
     <div id="call-container">
+        <div id="enrolledIdContainer">
+            <!-- show the enrolled id -->
+            <p>Enrolled ID: <span id="enrolledId"></span></p>
+            <button id="deleteEnrolledId">Re-Enroll</button>
+        </div>
+
         <div class="container">
             <div class="left">
 
             </div>
             <!-- a toast fake detected -->
             <div class="toast">
-                <p>Fake detected</p>
+                <span>Fraud detected</span>
             </div>
 
 
@@ -493,11 +545,7 @@
 
 
         <footer>
-            <div id="enrolledIdContainer">
-                <!-- show the enrolled id -->
-                <p>Enrolled ID: <span id="enrolledId"></span></p>
-                <button id="deleteEnrolledId">Re-Enroll</button>
-            </div>
+
             <div class="controls">
                 <button id="startButton">Call</button>
                 <button id="stopButton" disabled>End Call</button>
@@ -698,7 +746,6 @@
             // 4. Improve state transitions
             function switchToCallState(enrolledId) {
                 resetAllState();
-
                 // Update UI
                 document.getElementById('enroll-container').style.display = 'none';
                 document.getElementById('call-container').style.display = 'block';
@@ -710,7 +757,7 @@
                 stopButton.disabled = true;
 
                 // Connect WebSocket for calling
-                connectWebSocket();
+                // connectWebSocket();
             }
 
             function switchToEnrollState() {
@@ -764,19 +811,6 @@
                 websocket.onopen = function () {
                     console.log('WebSocket connection established');
                     reconnectAttempts = 0;
-                    startButton.disabled = false;
-                    stopButton.disabled = true;
-
-                    // Setup heartbeat
-                    const heartbeat = setInterval(() => {
-                        if (websocket?.readyState === WebSocket.OPEN) {
-                            websocket.send(JSON.stringify({ type: 'ping' }));
-                        } else {
-                            clearInterval(heartbeat);
-                        }
-                    }, 5000);
-
-                    websocket.addEventListener('close', () => clearInterval(heartbeat));
                 };
 
                 websocket.onclose = function () {
@@ -791,6 +825,8 @@
                     console.log('WebSocket message:', event.data);
                     if (String(event.data).toLowerCase() === 'fake') {
                         document.querySelector('.left').classList.add('active');
+                        const toast = document.querySelector('.toast');
+                        toast.style.display = 'block';
                     } else {
                         document.querySelector('.left').classList.remove('active');
                     }
@@ -798,8 +834,27 @@
 
                 websocket.onerror = function (error) {
                     console.error('WebSocket error:', error);
-                    resetUIState();
                 };
+            }
+
+            function resetUIState() {
+                // Only reset button states if we're not actively recording
+                if (!audioStream) {
+                    const startButton = document.getElementById('startButton');
+                    const stopButton = document.getElementById('stopButton');
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                }
+
+                // Keep wave visible but stop the animation
+                if (waveAnimationId) {
+                    cancelAnimationFrame(waveAnimationId);
+                    waveAnimationId = null;
+                }
+
+                const leftDiv = document.querySelector('.left');
+                leftDiv.classList.remove('active');
+                document.querySelector('.toast').style.display = 'none';
             }
 
             const enrolledId = getEnrolledId();
@@ -844,28 +899,19 @@
             // Update deepfake detection toggle handler
             document.getElementById('fakeButton').addEventListener('change', function (e) {
                 localStorage.setItem('deepfakeDetection', e.target.checked);
+
+                // Either disonnect exiting call or do page refresh
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    websocket.close();
+                    websocket = null;
+                }
+                window.location.reload();
+
                 if (websocket && websocket.readyState === WebSocket.OPEN) {
                     // Reconnect to switch between detection modes
                     connectWebSocket();
                 }
             });
-
-            function resetUIState() {
-                startButton.disabled = false;
-                stopButton.disabled = true;
-                const leftDiv = document.querySelector('.left');
-                leftDiv.classList.remove('active');
-                document.querySelector('.toast').style.display = 'none';
-                if (audioStream) {
-                    audioStream.getTracks().forEach(track => track.stop());
-                }
-
-                // Keep wave visible but stop the animation
-                if (waveAnimationId) {
-                    cancelAnimationFrame(waveAnimationId);
-                    waveAnimationId = null;
-                }
-            }
 
             // Update startRecording function to properly handle wave visualization
             async function startRecording() {
@@ -1009,6 +1055,12 @@
             }
         </script>
     </div>
+
+    <!-- Wave container -->
+    <div class="wave">
+        <canvas id="waveCanvas"></canvas>
+    </div>
+
 </body>
 
 </html>
