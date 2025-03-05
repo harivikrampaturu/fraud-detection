@@ -827,6 +827,9 @@
                         document.querySelector('.left').classList.add('active');
                         const toast = document.querySelector('.toast');
                         toast.style.display = 'block';
+                        setTimeout(() => {
+                            toast.style.display = 'none';
+                        }, 3000);
                     } else {
                         document.querySelector('.left').classList.remove('active');
                     }
