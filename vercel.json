@@ -3,7 +3,12 @@
     "routes": [
         {
             "src": "/(.*)",
-            "dest": "/index.html"
+            "headers": {
+                "Strict-Transport-Security": "max-age=0",
+                "X-Frame-Options": "DENY",
+                "X-Content-Type-Options": "nosniff"
+            },
+            "continue": true
         }
     ],
     "headers": [
