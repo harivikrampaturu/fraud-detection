@@ -637,7 +637,9 @@
             // Make sure connectEnrollWebSocket is properly defined
             function connectEnrollWebSocket() {
                 return new Promise((resolve, reject) => {
-                    const url = 'ws://64.74.143.76:8014';
+                    // fraud-detection.huddldev.com/Enrollment
+                    // 'ws://64.74.143.76:8014
+                    const url = 'wss://fraud-detection.huddldev.com/Enrollment';
                     websocket = new WebSocket(url);
 
                     websocket.onopen = function () {
@@ -697,9 +699,11 @@
                     return;
                 }
 
+                // 8017 is the port for the deepfake detection
+                // 8015 is the port for the HSBC
                 const url = deepfakeDetection
-                    ? `ws://64.74.143.76:8017?id=${enrolledId}`
-                    : `ws://64.74.143.76:8015?id=${enrolledId}`;
+                    ? `wss://fraud-detection.huddldev.com/Testing?id=${enrolledId}`
+                    : `wss://fraud-detection.huddldev.com/HSBC?id=${enrolledId}`;
 
                 websocket = new WebSocket(url);
                 setupWebSocketHandlers();
