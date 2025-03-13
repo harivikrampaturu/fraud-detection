@@ -650,8 +650,6 @@
 
                     websocket.onerror = function (error) {
                         console.error('Enrollment WebSocket error:', error);
-                        debugger
-                        localStorage.removeItem('enrolled');
                         reject(error);
                     };
 
@@ -679,7 +677,6 @@
                                 reconnectAttempts++;
                                 setTimeout(() => connectEnrollWebSocket().catch(reject), 1000 * reconnectAttempts);
                             } else {
-                                localStorage.removeItem('enrolled');
                                 reject(new Error('Max reconnection attempts reached'));
                             }
                         }
